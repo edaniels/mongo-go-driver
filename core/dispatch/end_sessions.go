@@ -38,3 +38,28 @@ func EndSessions(
 
 	return cmd.RoundTrip(ctx, desc, conn)
 }
+
+func CommandCursor(
+	ctx context.Context,
+	cmd command.Command,
+	topo *topology.Topology,
+	selector description.ServerSelector,
+) (command.Cursor, error) {
+
+	ss, err := topo.SelectServer(ctx, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := ss.Connection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	rdr, err := cmd.RoundTrip(ctx, ss.Description(), conn)
+	if err != nil {
+		return nil, err
+	}
+	return ss.BuildCursor(rdr)
+}

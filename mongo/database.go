@@ -218,3 +218,11 @@ func (db *Database) ReadPreference() *readpref.ReadPref {
 func (db *Database) WriteConcern() *writeconcern.WriteConcern {
 	return db.writeConcern
 }
+
+func (db *Database) RunCommandCursor(ctx context.Context, runCommand interface{}) (Cursor, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := command.Command{DB: db.Name(), Command: runCommand}
+	return dispatch.CommandCursor(ctx, cmd, db.client.topology, db.writeSelector)
+}
