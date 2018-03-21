@@ -49,6 +49,8 @@ var tUint64 = reflect.TypeOf(uint64(0))
 
 var tEmpty = reflect.TypeOf((*interface{})(nil)).Elem()
 
+var tDocumentUnmarshaler = reflect.TypeOf((*DocumentUnmarshaler)(nil)).Elem()
+
 var zeroVal reflect.Value
 
 // Unmarshaler describes a type that can unmarshal itself from BSON bytes.
@@ -194,6 +196,12 @@ func (d *Decoder) Decode(v interface{}) error {
 
 		_, err = t.Validate()
 		return err
+	case DocumentUnmarshaler:
+		var doc Document
+		if err := d.Decode(&doc); err != nil {
+			return err
+		}
+		return t.UnmarshalBSONDocument(&doc)
 
 	default:
 		rval := reflect.ValueOf(v)
@@ -247,6 +255,13 @@ func (d *Decoder) createEmptyValue(r Reader, t reflect.Type) (reflect.Value, err
 		return reflect.ValueOf(r), nil
 	}
 
+	// TODO: Test this for both paths
+	if t.Implements(tDocumentUnmarshaler) {
+		return reflect.New(t).Elem(), nil
+	} else if reflect.PtrTo(t).Implements(tDocumentUnmarshaler) {
+		return reflect.New(t), nil
+	}
+
 	switch t.Kind() {
 	case reflect.Map:
 		val = reflect.MakeMap(t)
@@ -274,7 +289,7 @@ func (d *Decoder) createEmptyValue(r Reader, t reflect.Type) (reflect.Value, err
 			return val, err
 		}
 
-		val = reflect.MakeSlice(t.Elem(), length, length)
+		val = reflect.MakeSlice(t, length, length)
 	case reflect.Struct:
 		val = reflect.New(t)
 	default:
@@ -288,7 +303,11 @@ func (d *Decoder) getReflectValue(v *Value, containerType reflect.Type, outer re
 	var val reflect.Value
 
 	for containerType.Kind() == reflect.Ptr {
-		containerType = containerType.Elem()
+		ptr, err := d.getReflectValue(v, containerType.Elem(), outer)
+		if err != nil {
+			return val, err
+		}
+		return ptr.Addr(), nil
 	}
 
 	switch v.Type() {

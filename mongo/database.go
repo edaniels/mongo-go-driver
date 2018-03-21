@@ -11,6 +11,7 @@ import (
 
 	"github.com/mongodb/mongo-go-driver/bson"
 	"github.com/mongodb/mongo-go-driver/mongo/private/cluster"
+	"github.com/mongodb/mongo-go-driver/mongo/private/conn"
 	"github.com/mongodb/mongo-go-driver/mongo/private/ops"
 	"github.com/mongodb/mongo-go-driver/mongo/readconcern"
 	"github.com/mongodb/mongo-go-driver/mongo/readpref"
@@ -64,9 +65,7 @@ func (db *Database) Collection(name string) *Collection {
 	return newCollection(db, name)
 }
 
-// RunCommand runs a command on the database. A user can supply a custom
-// context to this method, or nil to default to context.Background().
-func (db *Database) RunCommand(ctx context.Context, command interface{}) (bson.Reader, error) {
+func (db *Database) runCommandInternal(ctx context.Context, command interface{}) (bson.Reader, *ops.SelectedServer, error) {
 
 	if ctx == nil {
 		ctx = context.Background()
@@ -74,8 +73,31 @@ func (db *Database) RunCommand(ctx context.Context, command interface{}) (bson.R
 
 	s, err := db.client.selectServer(ctx, readpref.Selector(readpref.Primary()), readpref.Primary())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return ops.RunCommand(ctx, s, db.Name(), command)
+	rdr, err := ops.RunCommand(ctx, s, db.Name(), command)
+	return rdr, s, err
+}
+
+// RunCommand runs a command on the database. A user can supply a custom
+// context to this method, or nil to default to context.Background().
+func (db *Database) RunCommand(ctx context.Context, command interface{}) (bson.Reader, error) {
+	rdr, _, err := db.runCommandInternal(ctx, command)
+	return rdr, err
+}
+
+// RunCommand runs a command on the database and returns a cursor. A user
+// can supply a custom context to this method, or nil to default to context.Background().
+func (db *Database) RunCommandCursor(ctx context.Context, command interface{}) (Cursor, error) {
+	rdr, s, err := db.runCommandInternal(ctx, command)
+	switch err {
+	case nil:
+		return ops.NewCursor(rdr, 0, s) // TODO: Adjust batch size
+	default:
+		if conn.IsNsNotFound(err) {
+			return ops.NewExhaustedCursor()
+		}
+		return nil, err
+	}
 }

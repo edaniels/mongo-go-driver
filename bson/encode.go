@@ -287,9 +287,9 @@ func (e *encoder) encodeMap(val reflect.Value) ([]*Element, error) {
 			return nil, fmt.Errorf("Unsupported map key type %s", rkey.Kind())
 		}
 
-		rval := val.MapIndex(rkey)
+		mval := val.MapIndex(rkey).Interface()
 
-		switch t := rval.Interface().(type) {
+		switch t := mval.(type) {
 		case *Element:
 			elems = append(elems, t)
 			continue
@@ -300,9 +300,8 @@ func (e *encoder) encodeMap(val reflect.Value) ([]*Element, error) {
 			elems = append(elems, EC.SubDocumentFromReader(key, t))
 			continue
 		}
-		rval = e.underlyingVal(rval)
 
-		elem, err := e.elemFromValue(key, rval, false)
+		elem, err := e.elemFromValue(key, mval, false)
 		if err != nil {
 			return nil, err
 		}
@@ -314,9 +313,9 @@ func (e *encoder) encodeMap(val reflect.Value) ([]*Element, error) {
 func (e *encoder) encodeSlice(val reflect.Value) ([]*Element, error) {
 	elems := make([]*Element, 0, val.Len())
 	for i := 0; i < val.Len(); i++ {
-		sval := val.Index(i)
+		sval := val.Index(i).Interface()
 		key := strconv.Itoa(i)
-		switch t := sval.Interface().(type) {
+		switch t := sval.(type) {
 		case *Element:
 			elems = append(elems, t)
 			continue
@@ -327,7 +326,6 @@ func (e *encoder) encodeSlice(val reflect.Value) ([]*Element, error) {
 			elems = append(elems, EC.SubDocumentFromReader(key, t))
 			continue
 		}
-		sval = e.underlyingVal(sval)
 		elem, err := e.elemFromValue(key, sval, false)
 		if err != nil {
 			return nil, err
@@ -401,8 +399,13 @@ func (e *encoder) encodeStruct(val reflect.Value) ([]*Element, error) {
 		}
 
 		field := val.Field(i)
+		fieldVal := val.Field(i).Interface()
 
-		switch t := field.Interface().(type) {
+		if omitempty && e.isZero(field) {
+			continue
+		}
+
+		switch t := fieldVal.(type) {
 		case *Element:
 			elems = append(elems, t)
 			continue
@@ -436,10 +439,13 @@ func (e *encoder) encodeStruct(val reflect.Value) ([]*Element, error) {
 			}
 		}
 
+		// TODO: Can this be removed now?
 		if omitempty && e.isZero(field) {
 			continue
 		}
-		elem, err := e.elemFromValue(key, field, minsize)
+
+		// TODO: This fieldVal is different from the current field.Interface()
+		elem, err := e.elemFromValue(key, fieldVal, minsize)
 		if err != nil {
 			return nil, err
 		}
@@ -469,7 +475,103 @@ func (e *encoder) isZero(v reflect.Value) bool {
 	return false
 }
 
-func (e *encoder) elemFromValue(key string, val reflect.Value, minsize bool) (*Element, error) {
+func (e *encoder) elemFromValue(key string, value interface{}, minsize bool) (*Element, error) {
+	var elem *Element
+	var err error
+	switch t := value.(type) {
+	case bool:
+		elem = EC.Boolean(key, t)
+	case int8:
+		elem = EC.Int32(key, int32(t))
+	case int16:
+		elem = EC.Int32(key, int32(t))
+	case int32:
+		elem = EC.Int32(key, int32(t))
+	case int:
+		if t < math.MaxInt32 {
+			elem = EC.Int32(key, int32(t))
+		}
+		elem = EC.Int64(key, int64(t))
+	case int64:
+		if t < math.MaxInt32 {
+			elem = EC.Int32(key, int32(t))
+		}
+		elem = EC.Int64(key, int64(t))
+	case uint8:
+		elem = EC.Int32(key, int32(t))
+	case uint16:
+		elem = EC.Int32(key, int32(t))
+	case uint32:
+		if t < math.MaxInt32 {
+			elem = EC.Int32(key, int32(t))
+		}
+		elem = EC.Int64(key, int64(t))
+	case float32:
+		elem = EC.Double(key, float64(t))
+	case float64:
+		elem = EC.Double(key, t)
+	case string:
+		elem = EC.String(key, t)
+	case uint:
+		switch {
+		case t < math.MaxInt32:
+			elem = EC.Int32(key, int32(t))
+		case t > math.MaxInt64:
+			err = fmt.Errorf("BSON only has signed integer types and %d overflows an int64", t)
+		default:
+			elem = EC.Int64(key, int64(t))
+		}
+	case uint64:
+		switch {
+		case t < math.MaxInt32:
+			elem = EC.Int32(key, int32(t))
+		case t > math.MaxInt64:
+			err = fmt.Errorf("BSON only has signed integer types and %d overflows an int64", t)
+		default:
+			elem = EC.Int64(key, int64(t))
+		}
+	case *Element:
+		elem = t
+	case *Document:
+		elem = EC.SubDocument(key, t)
+	case Reader:
+		elem = EC.SubDocumentFromReader(key, t)
+	case *Value:
+		elem = convertValueToElem(key, t)
+		if elem == nil {
+			err = errors.New("invalid *Value provided, cannot convert to *Element")
+		}
+	case DocumentMarshaler:
+		doc, err := t.MarshalBSONDocument()
+		if err != nil {
+			return nil, err
+		}
+		elem = EC.SubDocument(key, doc)
+	case ValueMarshaler:
+		val, err := t.MarshalBSONValue()
+		if err != nil {
+			return nil, err
+		}
+		elem = convertValueToElem(key, val)
+		if elem == nil {
+			err = errors.New("invalid *Value provided, cannot convert to *Element")
+		}
+	default:
+		enc := new(encoder)
+		val := reflect.ValueOf(value)
+		val = enc.underlyingVal(val)
+
+		elem, err = enc.elemFromValueReflect(key, val, true)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return elem, nil
+}
+
+func (e *encoder) elemFromValueReflect(key string, val reflect.Value, minsize bool) (*Element, error) {
 	var elem *Element
 	switch val.Kind() {
 	case reflect.Bool:

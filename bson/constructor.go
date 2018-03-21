@@ -7,11 +7,6 @@
 package bson
 
 import (
-	"errors"
-	"fmt"
-	"math"
-	"reflect"
-
 	"github.com/mongodb/mongo-go-driver/bson/decimal"
 	"github.com/mongodb/mongo-go-driver/bson/elements"
 	"github.com/mongodb/mongo-go-driver/bson/objectid"
@@ -35,131 +30,19 @@ type ValueConstructor struct{}
 // by typecasting or through reflection, a null Element is constructed with the
 // key. This method will never return a nil *Element. If an error turning the
 // value into an Element is desired, use the InterfaceErr method.
-func (ElementConstructor) Interface(key string, value interface{}) *Element {
-	var elem *Element
-	switch t := value.(type) {
-	case bool:
-		elem = EC.Boolean(key, t)
-	case int8:
-		elem = EC.Int32(key, int32(t))
-	case int16:
-		elem = EC.Int32(key, int32(t))
-	case int32:
-		elem = EC.Int32(key, int32(t))
-	case int:
-		if t < math.MaxInt32 {
-			elem = EC.Int32(key, int32(t))
-		}
-		elem = EC.Int64(key, int64(t))
-	case int64:
-		if t < math.MaxInt32 {
-			elem = EC.Int32(key, int32(t))
-		}
-		elem = EC.Int64(key, int64(t))
-	case uint8:
-		elem = EC.Int32(key, int32(t))
-	case uint16:
-		elem = EC.Int32(key, int32(t))
-	case uint:
-		switch {
-		case t < math.MaxInt32:
-			elem = EC.Int32(key, int32(t))
-		case t > math.MaxInt64:
-			elem = EC.Null(key)
-		default:
-			elem = EC.Int64(key, int64(t))
-		}
-	case uint32:
-		if t < math.MaxInt32 {
-			elem = EC.Int32(key, int32(t))
-		}
-		elem = EC.Int64(key, int64(t))
-	case uint64:
-		switch {
-		case t < math.MaxInt32:
-			elem = EC.Int32(key, int32(t))
-		case t > math.MaxInt64:
-			elem = EC.Null(key)
-		default:
-			elem = EC.Int64(key, int64(t))
-		}
-	case float32:
-		elem = EC.Double(key, float64(t))
-	case float64:
-		elem = EC.Double(key, t)
-	case string:
-		elem = EC.String(key, t)
-	case *Element:
-		elem = t
-	case *Document:
-		elem = EC.SubDocument(key, t)
-	case Reader:
-		elem = EC.SubDocumentFromReader(key, t)
-	case *Value:
-		elem = convertValueToElem(key, t)
-		if elem == nil {
-			elem = EC.Null(key)
-		}
-	default:
-		var err error
-		enc := new(encoder)
-		val := reflect.ValueOf(value)
-		val = enc.underlyingVal(val)
-
-		elem, err = enc.elemFromValue(key, val, true)
-		if err != nil {
-			elem = EC.Null(key)
-		}
+func (c ElementConstructor) Interface(key string, value interface{}) *Element {
+	elem, err := c.InterfaceErr(key, value)
+	if err != nil {
+		return EC.Null(key)
 	}
-
 	return elem
 }
 
 // InterfaceErr does what Interface does, but returns an error when it cannot
 // properly convert a value into an *Element. See Interface for details.
 func (c ElementConstructor) InterfaceErr(key string, value interface{}) (*Element, error) {
-	var elem *Element
-	var err error
-	switch t := value.(type) {
-	case bool, int8, int16, int32, int, int64, uint8, uint16,
-		uint32, float32, float64, string, *Element, *Document, Reader:
-		elem = c.Interface(key, value)
-	case uint:
-		switch {
-		case t < math.MaxInt32:
-			elem = EC.Int32(key, int32(t))
-		case t > math.MaxInt64:
-			err = fmt.Errorf("BSON only has signed integer types and %d overflows an int64", t)
-		default:
-			elem = EC.Int64(key, int64(t))
-		}
-	case uint64:
-		switch {
-		case t < math.MaxInt32:
-			elem = EC.Int32(key, int32(t))
-		case t > math.MaxInt64:
-			err = fmt.Errorf("BSON only has signed integer types and %d overflows an int64", t)
-		default:
-			elem = EC.Int64(key, int64(t))
-		}
-	case *Value:
-		elem = convertValueToElem(key, t)
-		if elem == nil {
-			err = errors.New("invalid *Value provided, cannot convert to *Element")
-		}
-	default:
-		enc := new(encoder)
-		val := reflect.ValueOf(value)
-		val = enc.underlyingVal(val)
-
-		elem, err = enc.elemFromValue(key, val, true)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return elem, nil
+	enc := new(encoder)
+	return enc.elemFromValue(key, value, true)
 }
 
 // Double creates a double element with the given key and value.
