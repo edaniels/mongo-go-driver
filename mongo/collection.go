@@ -147,6 +147,83 @@ func (coll *Collection) InsertOne(ctx context.Context, document interface{},
 	return &InsertOneResult{InsertedID: insertedID}, nil
 }
 
+// InsertOne inserts a single document into the collection. A user can supply
+// a custom context to this method, or nil to default to context.Background().
+//
+// This method uses TransformDocument to turn the document parameter into a
+// *bson.Document. See TransformDocument for the list of valid types for
+// document.
+//
+// TODO(skriptble): Determine if we should unwrap the value for the
+// InsertOneResult or just return the bson.Element or a bson.Value.
+func (coll *Collection) InsertOneRaw(ctx context.Context, document interface{},
+	opts ...options.InsertOneOptioner) (bson.Reader, error) {
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	doc, err := TransformDocument(document)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = ensureID(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := coll.getWriteableServer(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if coll.writeConcern != nil {
+		wc, err := Opt.WriteConcern(coll.writeConcern)
+		if err != nil {
+			return nil, err
+		}
+
+		opts = append(opts, wc)
+	}
+
+	newOptions := make([]options.InsertOptioner, 0, len(opts))
+	for _, opt := range opts {
+		newOptions = append(newOptions, opt)
+	}
+
+	insert := func() (bson.Reader, error) {
+		return ops.Insert(
+			ctx,
+			s,
+			coll.namespace(),
+			[]*bson.Document{doc},
+			newOptions...,
+		)
+	}
+
+	acknowledged := true
+
+	for _, opt := range opts {
+		if wc, ok := opt.(options.OptWriteConcern); ok {
+			acknowledged = wc.Acknowledged
+			break
+		}
+	}
+
+	if !acknowledged {
+		go func() { _, _ = insert() }()
+		return nil, nil
+	}
+
+	result, err := insert()
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // InsertMany inserts the provided documents. A user can supply a custom context to this
 // method.
 //
@@ -451,6 +528,67 @@ func (coll *Collection) updateOrReplaceOne(ctx context.Context, filter,
 	return &result, nil
 }
 
+func (coll *Collection) updateOrReplaceOneRaw(ctx context.Context, filter,
+	update *bson.Document, opts ...options.UpdateOptioner) (bson.Reader, error) {
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	updateDocs := []*bson.Document{
+		bson.NewDocument(
+			bson.EC.SubDocument("q", filter),
+			bson.EC.SubDocument("u", update),
+			bson.EC.Boolean("multi", false),
+		),
+	}
+
+	s, err := coll.getWriteableServer(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if coll.writeConcern != nil {
+		wc, err := Opt.WriteConcern(coll.writeConcern)
+		if err != nil {
+			return nil, err
+		}
+
+		opts = append(opts, wc)
+	}
+
+	doUpdate := func() (bson.Reader, error) {
+		return ops.Update(
+			ctx,
+			s,
+			coll.namespace(),
+			updateDocs,
+			opts...,
+		)
+	}
+
+	acknowledged := true
+
+	for _, opt := range opts {
+		if wc, ok := opt.(options.OptWriteConcern); ok {
+			acknowledged = wc.Acknowledged
+			break
+		}
+	}
+
+	if !acknowledged {
+		go func() { _, _ = doUpdate() }()
+		return nil, nil
+	}
+
+	rdr, err := doUpdate()
+	if err != nil {
+		return nil, err
+	}
+
+	return rdr, nil
+}
+
 // UpdateOne updates a single document in the collection. A user can supply a
 // custom context to this method, or nil to default to context.Background().
 //
@@ -479,6 +617,36 @@ func (coll *Collection) UpdateOne(ctx context.Context, filter interface{}, updat
 	}
 
 	return coll.updateOrReplaceOne(ctx, f, u, options...)
+}
+
+// UpdateOne updates a single document in the collection. A user can supply a
+// custom context to this method, or nil to default to context.Background().
+//
+// This method uses TransformDocument to turn the filter and update parameter
+// into a *bson.Document. See TransformDocument for the list of valid types for
+// filter and update.
+func (coll *Collection) UpdateOneRaw(ctx context.Context, filter interface{}, update interface{},
+	options ...options.UpdateOptioner) (bson.Reader, error) {
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	f, err := TransformDocument(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := TransformDocument(update)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := ensureDollarKey(u); err != nil {
+		return nil, err
+	}
+
+	return coll.updateOrReplaceOneRaw(ctx, f, u, options...)
 }
 
 // UpdateMany updates multiple documents in the collection. A user can supply
