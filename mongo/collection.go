@@ -775,6 +775,35 @@ func (coll *Collection) ReplaceOne(ctx context.Context, filter interface{},
 	return coll.updateOrReplaceOne(ctx, f, r, updateOptions...)
 }
 
+func (coll *Collection) ReplaceOneRaw(ctx context.Context, filter interface{},
+	replacement interface{}, opts ...options.ReplaceOptioner) (bson.Reader, error) {
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	f, err := TransformDocument(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := TransformDocument(replacement)
+	if err != nil {
+		return nil, err
+	}
+
+	if elem, ok := r.ElementAtOK(0); ok && strings.HasPrefix(elem.Key(), "$") {
+		return nil, errors.New("replacement document cannot contains keys beginning with '$")
+	}
+
+	updateOptions := make([]options.UpdateOptioner, 0, len(opts))
+	for _, opt := range opts {
+		updateOptions = append(updateOptions, opt)
+	}
+
+	return coll.updateOrReplaceOneRaw(ctx, f, r, updateOptions...)
+}
+
 // Aggregate runs an aggregation framework pipeline. A user can supply a custom context to
 // this method.
 //
