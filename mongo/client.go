@@ -196,12 +196,14 @@ func newClient(cs connstring.ConnString, opts ...*options.ClientOptions) (*Clien
 	}
 	client.id = clientID
 
-	topts := append(
+        topts := append(
 		client.topologyOptions,
 		topology.WithConnString(func(connstring.ConnString) connstring.ConnString { return client.connString }),
 		topology.WithServerOptions(func(opts ...topology.ServerOption) []topology.ServerOption {
 			return append(opts, topology.WithClock(func(clock *session.ClusterClock) *session.ClusterClock {
 				return client.clock
+			}), topology.WithRegistry(func(registry *bsoncodec.Registry) *bsoncodec.Registry {
+				return client.registry
 			}))
 		}),
 	)
