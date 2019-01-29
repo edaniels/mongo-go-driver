@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"errors"
+
 	"github.com/mongodb/mongo-go-driver/bson/bsoncodec"
 	"github.com/mongodb/mongo-go-driver/mongo/options"
 	"github.com/mongodb/mongo-go-driver/mongo/readpref"
 	"github.com/mongodb/mongo-go-driver/x/bsonx"
+	"github.com/mongodb/mongo-go-driver/x/log"
 	"github.com/mongodb/mongo-go-driver/x/mongo/driver/session"
 	"github.com/mongodb/mongo-go-driver/x/mongo/driver/topology"
 	"github.com/mongodb/mongo-go-driver/x/mongo/driver/uuid"
@@ -38,13 +40,23 @@ func Find(
 	opts ...*options.FindOptions,
 ) (command.Cursor, error) {
 
+	logger, haveLogger := mongolog.FromContext(ctx)
+
+	before := time.Now()
 	ss, err := topo.SelectServer(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
+	if haveLogger {
+		logger.Debugw("selected server", "mongo_server", ss.String(), "select_server_duration", time.Since(before).Seconds()*1e3)
+	}
 
 	desc := ss.Description()
+	before = time.Now()
 	conn, err := ss.Connection(ctx)
+	if haveLogger {
+		logger.Debugw("got connection", "server_connection_duration", time.Since(before).Seconds()*1e3)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +179,11 @@ func Find(
 		cmd.Opts = append(cmd.Opts, sortElem)
 	}
 
+	before = time.Now()
 	c, err := cmd.RoundTrip(ctx, desc, ss, conn)
+	if haveLogger {
+		logger.Debugw("round tripped command", "cmd_round_trip_duration", time.Since(before).Seconds()*1e3)
+	}
 	if err != nil {
 		closeImplicitSession(cmd.Session)
 	}
