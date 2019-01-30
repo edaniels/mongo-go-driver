@@ -80,7 +80,7 @@ func (ls *latencySelector) SelectServer(t Topology, candidates []Server) ([]Serv
 			return candidates, nil
 		}
 
-		max := min + ls.latency
+		max := min
 
 		var result []Server
 		for _, candidate := range candidates {
