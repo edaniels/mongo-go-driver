@@ -459,12 +459,23 @@ func (cs *ChangeStream) ResumeToken() bson.Raw {
 // Next gets the next result from this change stream. Returns true if there were no errors and the next
 // result is available for decoding.
 func (cs *ChangeStream) Next(ctx context.Context) bool {
+	return cs.next(ctx, false)
+}
+
+// TryNext attempts to get the next result from this change stream. Returns true if there were no errors and the next
+// result is available for decoding. Otherwise there is either an error or a new resume token is
+// available for consumption.
+func (cs *ChangeStream) TryNext(ctx context.Context) bool {
+	return cs.next(ctx, true)
+}
+
+func (cs *ChangeStream) next(ctx context.Context, tryOnce bool) bool {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	if len(cs.batch) == 0 {
-		cs.loopNext(ctx)
+		cs.loopNext(ctx, tryOnce)
 		if cs.err != nil || len(cs.batch) == 0 {
 			cs.err = replaceErrors(cs.err)
 			return false
@@ -479,8 +490,10 @@ func (cs *ChangeStream) Next(ctx context.Context) bool {
 	return true
 }
 
-func (cs *ChangeStream) loopNext(ctx context.Context) {
-	for {
+func (cs *ChangeStream) loopNext(ctx context.Context, tryOnce bool) {
+	var loopedOnce bool
+	for !tryOnce || !loopedOnce {
+		loopedOnce = true
 		if cs.cursor == nil {
 			return
 		}
@@ -495,11 +508,11 @@ func (cs *ChangeStream) loopNext(ctx context.Context) {
 			cs.updatePbrtFromCommand()
 			continue
 		}
-
 		cs.err = replaceErrors(cs.cursor.Err())
 		if cs.err == nil {
 			// If a getMore was done but the batch was empty, the batch cursor will return false with no error
 			if len(cs.batch) == 0 {
+				cs.updatePbrtFromCommand()
 				continue
 			}
 			return
