@@ -675,3 +675,41 @@ func (t *Topology) String() string {
 	}
 	return fmt.Sprintf("Type: %s, Servers: [%s]", desc.Kind, serversStr)
 }
+
+// isTopologyConsistent returns false when we have a replica set that claims to
+// have no primary but there exists a primary with all other nodes as secondaries. This
+// specifically works around HELP-13825.
+func (t *Topology) IsConsistent() bool {
+	desc := t.Description()
+
+	if desc.Kind != description.ReplicaSetNoPrimary {
+		return true
+	}
+
+	t.serversLock.Lock()
+	serversCopy := make([]*Server, 0, len(t.servers))
+	for _, s := range t.servers {
+		serversCopy = append(serversCopy, s)
+	}
+	t.serversLock.Unlock()
+
+	if len(serversCopy) == 0 || len(serversCopy) == 1 {
+		return true
+	}
+	var foundPrimary bool
+	for _, server := range serversCopy {
+		serverDesc := server.Description()
+		switch serverDesc.Kind {
+		case description.RSPrimary:
+			if foundPrimary {
+				return true
+			}
+			foundPrimary = true
+		case description.RSSecondary:
+		default:
+			return true
+		}
+	}
+
+	return !foundPrimary
+}

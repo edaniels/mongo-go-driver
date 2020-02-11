@@ -138,6 +138,16 @@ func NewClient(opts ...*options.ClientOptions) (*Client, error) {
 	return client, nil
 }
 
+// IsTopologyConsistent returns false when we have a replica set that claims to
+// have no primary but there exists a primary with all other nodes as secondaries. This
+// specifically works around HELP-13825.
+func (c *Client) IsTopologyConsistent() bool {
+	if topo, ok := c.deployment.(*topology.Topology); ok {
+		return topo.IsConsistent()
+	}
+	return true
+}
+
 // Connect initializes the Client by starting background monitoring goroutines.
 // If the Client was created using the NewClient function, this method must be called before a Client can be used.
 //
