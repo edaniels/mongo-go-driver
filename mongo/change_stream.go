@@ -334,6 +334,14 @@ func (cs *ChangeStream) createPipelineOptionsDoc() bsoncore.Document {
 		plDoc = bsoncore.AppendStringElement(plDoc, "fullDocument", string(*cs.options.FullDocument))
 	}
 
+	if cs.options.FullDocumentBeforeChange != nil {
+		plDoc = bsoncore.AppendStringElement(
+			plDoc,
+			"fullDocumentBeforeChange",
+			string(*cs.options.FullDocumentBeforeChange),
+		)
+	}
+
 	if cs.options.ResumeAfter != nil {
 		var raDoc bsoncore.Document
 		raDoc, cs.err = transformBsoncoreDocument(cs.registry, cs.options.ResumeAfter)

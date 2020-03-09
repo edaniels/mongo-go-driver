@@ -13,13 +13,14 @@ import (
 
 // ChangeStreamOptions represents all possible options to a change stream
 type ChangeStreamOptions struct {
-	BatchSize            *int32               // The number of documents to return per batch
-	Collation            *Collation           // Specifies a collation
-	FullDocument         *FullDocument        // When set to ‘updateLookup’, the change notification for partial updates will include both a delta describing the changes to the document, as well as a copy of the entire document that was changed from some time after the change occurred.
-	MaxAwaitTime         *time.Duration       // The maximum amount of time for the server to wait on new documents to satisfy a change stream query
-	ResumeAfter          interface{}          // Specifies the logical starting point for the new change stream
-	StartAtOperationTime *primitive.Timestamp // Ensures that a change stream will only provide changes that occurred after a timestamp.
-	StartAfter           interface{}          // Specifies a resume token. The started change stream will return the first notification after the token.
+	BatchSize                *int32                    // The number of documents to return per batch
+	Collation                *Collation                // Specifies a collation
+	FullDocument             *FullDocument             // When set to ‘updateLookup’, the change notification for partial updates will include both a delta describing the changes to the document, as well as a copy of the entire document that was changed from some time after the change occurred.
+	FullDocumentBeforeChange *FullDocumentBeforeChange // When set to ‘whenAvailable’ or ‘required’ will have both the delta and the full document before the change was applied
+	MaxAwaitTime             *time.Duration            // The maximum amount of time for the server to wait on new documents to satisfy a change stream query
+	ResumeAfter              interface{}               // Specifies the logical starting point for the new change stream
+	StartAtOperationTime     *primitive.Timestamp      // Ensures that a change stream will only provide changes that occurred after a timestamp.
+	StartAfter               interface{}               // Specifies a resume token. The started change stream will return the first notification after the token.
 }
 
 // ChangeStream returns a pointer to a new ChangeStreamOptions
@@ -48,6 +49,12 @@ func (cso *ChangeStreamOptions) SetCollation(c Collation) *ChangeStreamOptions {
 // occurred.
 func (cso *ChangeStreamOptions) SetFullDocument(fd FullDocument) *ChangeStreamOptions {
 	cso.FullDocument = &fd
+	return cso
+}
+
+// When set to ‘whenAvailable’ or ‘required’ will have both the delta and the full document before the change was applied
+func (cso *ChangeStreamOptions) SetFullDocumentBeforeChange(fdbc FullDocumentBeforeChange) *ChangeStreamOptions {
+	cso.FullDocumentBeforeChange = &fdbc
 	return cso
 }
 
@@ -91,6 +98,9 @@ func MergeChangeStreamOptions(opts ...*ChangeStreamOptions) *ChangeStreamOptions
 		}
 		if cso.FullDocument != nil {
 			csOpts.FullDocument = cso.FullDocument
+		}
+		if cso.FullDocumentBeforeChange != nil {
+			csOpts.FullDocumentBeforeChange = cso.FullDocumentBeforeChange
 		}
 		if cso.MaxAwaitTime != nil {
 			csOpts.MaxAwaitTime = cso.MaxAwaitTime
